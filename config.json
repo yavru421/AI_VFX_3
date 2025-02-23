@@ -1,0 +1,30 @@
+{
+    "output_dir": "output",
+    "steps": [
+        {
+            "name": "Extract Motion Vectors",
+            "script": "ffmpeg",
+            "command": "ffmpeg -i {input} -flags2 +export_mvs -vf codecview=mv=pf+bf+bb -q:v 2 {output}/motion_vectors/frame_%04d.png"
+        }, 
+        {
+            "name": "Run AI Processing",
+            "script": "python",
+            "command": "python ai_processing.py {output}/motion_vectors"
+        },
+        {
+            "name": "Refine Masks",
+            "script": "python",
+            "command": "python refine_masks.py {output}/motion_vectors {output}/masks"
+        },
+        {
+            "name": "Run SegFormer",
+            "script": "python",
+            "command": "python segformer_background_removal.py"
+        },
+        {
+            "name": "Generate Transparent PNGs",
+            "script": "python",
+            "command": "python background_processing.py"
+        }
+    ]
+}

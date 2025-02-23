@@ -1,0 +1,20 @@
+name: ai_vfx_pipeline
+channels:
+  - defaults
+  - conda-forge
+  - nvidia
+dependencies:
+  - python=3.9
+  - numpy
+  - opencv
+  - pyqt
+  - cython
+  - pip
+  - rust
+  - ffmpeg
+  - cudatoolkit=11.8
+  - pip:
+      - opencv-contrib-python-headless>=4.8.0
+      - pyqt6
+      - pyqt6-tools
+      - huggingface_hub

@@ -1,0 +1,40 @@
+# AI_VFX_3: Offline AI-Powered Background Removal
+Copyright (c) 2024
+
+This Source Code Form is subject to the terms of the Mozilla Public License, v. 2.0.
+If a copy of the MPL was not distributed with this file, You can obtain one at
+<https://mozilla.org/MPL/2.0/>.
+
+Additional Restrictions:
+
+1. Commercial Use Restriction:
+   Commercial use, redistribution, or incorporation of this software into commercial
+   products or services requires explicit written permission from the project creator.
+   Contact via GitHub issues for licensing inquiries.
+
+2. No Closed-Source Distribution:
+   You may not distribute this software or any modifications in a closed-source format
+   without explicit permission from the project creator.
+
+3. Attribution Requirement:
+   Any distribution of this software or modifications must maintain attribution to
+   the original project and creator.
+
+The complete MPL 2.0 license text follows:
+
+Mozilla Public License Version 2.0
+==================================
+
+1. Definitions
+--------------
+
+1.1. "Contributor"
+    means each individual or legal entity that creates, contributes to
+    the creation of, or owns Covered Software.
+
+1.2. "Contributor Version"
+    means the combination of the Contributions of others (if any) used
+    by a Contributor and that particular Contributor's Contribution.
+
+// ...rest of MPL 2.0 license text...
+// Full text available at: <https://www.mozilla.org/en-US/MPL/2.0/>
