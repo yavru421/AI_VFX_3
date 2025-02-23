@@ -1,4 +1,7 @@
 # AI_VFX_3: Offline AI-Powered Background Removal  
+
+#its a work in progress, gut it does work!
+
 🚀 **No APIs. No Paywalls. 100% Local AI Video Processing.**  
 
 ## ✨ Why This Exists  
