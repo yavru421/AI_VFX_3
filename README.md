@@ -75,6 +75,9 @@ Key points:
 - Modifications must be shared back
 - No closed-source redistribution
 
+
+https://youtu.be/mYFrpPO2QrA
+
 ## 🤝 Contributing
 
 Please read [CONTRIBUTING.md](CONTRIBUTING.md) for contribution guidelines and code of conduct.
