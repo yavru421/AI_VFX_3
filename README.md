@@ -34,10 +34,10 @@ git clone https://github.com/yavru421/AI_VFX_3.git
 cd AI_VFX_3
 ```
 
-2. Create conda environment:
+2. Create  environment:
 ```bash
-conda env create -f environment.yml
-conda activate ai_vfx_pipeline
+env create -f environment.yml
+activate ai_vfx_pipeline
 ```
 
 ## 🚀 Usage
