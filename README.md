@@ -22,9 +22,9 @@ Most "AI background removers" force you to use cloud-based APIs, hidden subscrip
 
 ## ⚙️ Requirements
 
-- Python 3.9+
-- CUDA capable GPU
-- FFmpeg
+- Python 3.9+  
+- CUDA capable GPU  
+- FFmpeg  
 
 ## 📥 Installation
 
