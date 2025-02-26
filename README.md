@@ -1,4 +1,7 @@
 # AI_VFX_3: Offline AI-Powered Background Removal  
+
+#its a work in progress, gut it does work!
+
 🚀 **No APIs. No Paywalls. 100% Local AI Video Processing.**  
 
 ## ✨ Why This Exists  
@@ -34,10 +37,10 @@ git clone https://github.com/yavru421/AI_VFX_3.git
 cd AI_VFX_3
 ```
 
-2. Create conda environment:
+2. Create  environment:
 ```bash
-conda env create -f environment.yml
-conda activate ai_vfx_pipeline
+env create -f environment.yml
+activate ai_vfx_pipeline
 ```
 
 ## 🚀 Usage
@@ -74,6 +77,9 @@ Key points:
 - Commercial use requires explicit permission
 - Modifications must be shared back
 - No closed-source redistribution
+
+
+https://youtu.be/mYFrpPO2QrA
 
 ## 🤝 Contributing
 
