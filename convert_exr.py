@@ -1,91 +1,78 @@
 import os
-import json
-import numpy as np
 import cv2
+import numpy as np
 from pathlib import Path
 
-def load_config():
-    with open('config.json', 'r') as f:
-        return json.load(f)
+# Paths
+OUTPUT_DIR = "output"
+MOTION_VECTORS_DIR = os.path.join(OUTPUT_DIR, "motion_vectors")
+REFINED_MASKS_DIR = os.path.join(OUTPUT_DIR, "refined_masks")
+CUTOUTS_DIR = os.path.join(OUTPUT_DIR, "cutouts")
+SUBTRACTED_DIR = os.path.join(OUTPUT_DIR, "subtracted")
 
-def create_layered_sequence(output_dir):
-    """Create multi-layered image sequence with separate layers for each frame"""
-    base_dir = Path(output_dir)
-    
-    # Define layer sources and their descriptions
-    layers = {
-        'motion_vectors': {'dir': 'motion_vectors', 'desc': 'Motion Vector Data'},
-        'masks': {'dir': 'masks', 'desc': 'Initial Mask'},
-        'refined_masks': {'dir': 'refined_masks', 'desc': 'Refined Mask'},
-        'cutouts': {'dir': 'cutouts', 'desc': 'Final Cutout'}
-    }
-    
-    # Create output directory
-    layered_dir = base_dir / 'layered_sequences'
-    os.makedirs(layered_dir, exist_ok=True)
+def process_frame(frame_file, input_frame=None):
+    """Process a single frame, subtracting masked areas."""
+    refined_mask_path = os.path.join(REFINED_MASKS_DIR, frame_file)
+    output_path = os.path.join(SUBTRACTED_DIR, f"subtracted_{frame_file}")
 
-    # Get frame list from any populated directory
-    frame_source = None
-    for layer_info in layers.values():
-        check_dir = base_dir / layer_info['dir']
-        if check_dir.exists() and any(check_dir.glob('*.png')):
-            frame_source = check_dir
-            break
-
-    if not frame_source:
-        print("No source frames found in any directory")
+    # Load mask
+    refined_mask = cv2.imread(refined_mask_path, cv2.IMREAD_GRAYSCALE)
+    if refined_mask is None:
+        print(f" Skipping {frame_file} - No mask found")
         return
 
-    # Get frame numbers
-    frame_files = sorted(frame_source.glob('*.png'))
-    print(f"Found {len(frame_files)} frames to process")
+    # Use provided input frame or load from cutouts
+    if input_frame is None:
+        cutout_path = os.path.join(CUTOUTS_DIR, frame_file)
+        input_frame = cv2.imread(cutout_path, cv2.IMREAD_COLOR)
+        if input_frame is None:
+            print(f" Skipping {frame_file} - No input frame")
+            return
 
-    # Process each frame
-    for frame_file in frame_files:
-        frame_name = frame_file.stem
-        print(f"\nProcessing frame: {frame_name}")
-        
-        # Create frame directory to store layers
-        frame_dir = layered_dir / frame_name
-        os.makedirs(frame_dir, exist_ok=True)
-        
-        # Process each layer
-        for layer_name, layer_info in layers.items():
-            source_path = base_dir / layer_info['dir'] / frame_file.name
-            if source_path.exists():
-                try:
-                    # Read image
-                    img = cv2.imread(str(source_path), cv2.IMREAD_UNCHANGED)
-                    if img is not None:
-                        # Save layer with descriptive name
-                        layer_path = frame_dir / f"{layer_name}.png"
-                        cv2.imwrite(str(layer_path), img)
-                        print(f"  ✓ {layer_name}")
-                        
-                        # Create layer info file if doesn't exist
-                        info_file = frame_dir / "layers.txt"
-                        if not info_file.exists():
-                            with open(info_file, 'w') as f:
-                                f.write(f"Frame: {frame_name}\nLayers:\n")
-                        
-                        # Append layer info
-                        with open(info_file, 'a') as f:
-                            f.write(f"- {layer_name}: {layer_info['desc']}\n")
-                    else:
-                        print(f"  ✗ {layer_name} (invalid image)")
-                except Exception as e:
-                    print(f"  ✗ {layer_name} (error: {e})")
-            else:
-                print(f"  ✗ {layer_name} (missing)")
+    # Resize mask if needed
+    if refined_mask.shape[:2] != input_frame.shape[:2]:
+        refined_mask = cv2.resize(refined_mask, (input_frame.shape[1], input_frame.shape[0]), 
+                                interpolation=cv2.INTER_NEAREST)
 
-def main():
-    try:
-        config = load_config()
-        create_layered_sequence(config['output_dir'])
-        print("\nSequence processing complete!")
-    except Exception as e:
-        print(f"Error: {e}")
-        return
+    # Ensure mask is binary uint8
+    _, refined_mask = cv2.threshold(refined_mask, 127, 255, cv2.THRESH_BINARY)
+    
+    # Invert mask to keep non-masked areas
+    refined_mask = cv2.bitwise_not(refined_mask)
+    
+    # Apply mask to input frame
+    result = cv2.bitwise_and(input_frame, input_frame, mask=refined_mask)
+    
+    # Save result
+    os.makedirs(SUBTRACTED_DIR, exist_ok=True)
+    cv2.imwrite(output_path, result)
+    print(f" Saved subtracted frame: {output_path}")
+
+def process_video(input_video=None):
+    """Process entire video or directory of frames."""
+    if input_video and os.path.exists(input_video):
+        cap = cv2.VideoCapture(input_video)
+        frame_number = 0
+        
+        while True:
+            ret, frame = cap.read()
+            if not ret:
+                break
+                
+            frame_file = f"frame_{frame_number:04d}.png"
+            process_frame(frame_file, frame)
+            frame_number += 1
+            
+        cap.release()
+    else:
+        frame_files = sorted([f for f in os.listdir(CUTOUTS_DIR) if f.endswith(('.png', '.jpg'))])
+        for frame_file in frame_files:
+            process_frame(frame_file)
 
 if __name__ == "__main__":
-    main()
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--input', help='Optional input video file')
+    args = parser.parse_args()
+    
+    process_video(args.input if args else None)

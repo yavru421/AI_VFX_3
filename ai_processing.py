@@ -5,106 +5,80 @@ import numpy as np
 from tqdm import tqdm
 from transformers import SegformerForSemanticSegmentation, AutoImageProcessor
 import logging
-import sys
 
-#  Setup logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+# Set up logging
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
-#  Optimized GPU Settings
+# Ensure CUDA optimizations
 torch.backends.cuda.matmul.allow_tf32 = True
 torch.backends.cudnn.benchmark = True
 torch.backends.cudnn.allow_tf32 = True
-device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
 
-#  Basic Configurations
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+# Load model
 MODEL_NAME = "nvidia/segformer-b3-finetuned-ade-512-512"
-OUTPUT_DIR = "output"
-OUTPUT_MASKS_DIR = os.path.join(OUTPUT_DIR, "masks")
+processor = AutoImageProcessor.from_pretrained(MODEL_NAME)
+model = SegformerForSemanticSegmentation.from_pretrained(MODEL_NAME).to(device).eval()
 
-#  Streamlined GPU Memory Monitor
-def get_gpu_memory():
-    return {
-        'allocated': torch.cuda.memory_allocated() / 1e9,
-        'reserved': torch.cuda.memory_reserved() / 1e9
-    }
+# Paths
+SEGFORMER_MASKS_DIR = "output/segformer_masks"  
+MOTION_VECTORS_DIR = "output/motion_vectors"
+OUTPUT_MASKS_DIR = "output/masks"
+DEBUG_DIR = "output/debug"
 
-logging.info(f"Using {torch.cuda.get_device_name()}")
-logging.info(f"Initial GPU Memory: {get_gpu_memory()['allocated']:.2f}GB")
+os.makedirs(OUTPUT_MASKS_DIR, exist_ok=True)
+os.makedirs(DEBUG_DIR, exist_ok=True)
 
-#  Load AI Model
-processor = AutoImageProcessor.from_pretrained(MODEL_NAME, use_fast=True)
-model = SegformerForSemanticSegmentation.from_pretrained(MODEL_NAME)
-model = model.to(device).half()
-model.eval()
+def process_frame(segformer_mask_path, motion_vector_path, output_path):
+    logging.info(f"Processing: {segformer_mask_path}")
 
-#  Enhanced Mask Extraction
-def extract_foreground(logits, target_class=12, confidence_threshold=0.7):
-    probs = torch.softmax(logits, dim=1)
-    confidence_map = probs[:, target_class, :, :]
-    seg_map = torch.argmax(logits, dim=1).squeeze().cpu().numpy()
-    
-    confidence_mask = (confidence_map > confidence_threshold).float().cpu().numpy()
-    binary_mask = np.where(seg_map == target_class, 255, 0).astype(np.uint8)
-    refined_mask = (binary_mask * confidence_mask[0]).astype(np.uint8)
-    return refined_mask
-
-#  Process Frame
-
-def process_frame(image_path, output_path):
-    img = cv2.imread(image_path, cv2.IMREAD_COLOR)
-    if img is None:
-        logging.error(f"Failed to read image: {image_path}")
+    # Load SegFormer mask
+    mask = cv2.imread(segformer_mask_path, cv2.IMREAD_GRAYSCALE)
+    if mask is None:
+        logging.error(f"❌ Failed to read SegFormer mask: {segformer_mask_path}")
         return False
 
-    original_size = (img.shape[1], img.shape[0])
-    img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+    # Load motion vector, check if it exists
+    if os.path.exists(motion_vector_path):
+        motion_vector = cv2.imread(motion_vector_path, cv2.IMREAD_GRAYSCALE)
+    else:
+        logging.warning(f"⚠️ Motion vector missing for {motion_vector_path}. Using fallback.")
+        motion_vector = np.ones_like(mask) * 255  # Fallback to all white
 
-    with torch.cuda.amp.autocast():
-        inputs = processor(images=img_rgb, return_tensors="pt", do_resize=True, size={'height': 512, 'width': 512})
-        inputs = {k: v.to(device, dtype=torch.float16) for k, v in inputs.items()}
-        
-        with torch.no_grad():
-            outputs = model(**inputs)
+    # Ensure size consistency by resizing **mask** to motion vector size
+    if motion_vector.shape != mask.shape:
+        logging.warning(f"Resizing AI mask from {mask.shape} to match motion vector size {motion_vector.shape}")
+        mask = cv2.resize(mask, (motion_vector.shape[1], motion_vector.shape[0]), interpolation=cv2.INTER_NEAREST)
 
-    mask = extract_foreground(outputs.logits)
-    mask_resized = cv2.resize(mask, original_size, interpolation=cv2.INTER_LINEAR)
-    cv2.imwrite(output_path, mask_resized)
+    # Ensure both are uint8
+    mask = mask.astype(np.uint8)
+    motion_vector = motion_vector.astype(np.uint8)
+
+    # Apply refinement
+    refined_mask = cv2.bitwise_and(mask, motion_vector)
+
+    # Save debug output
+    debug_path = output_path.replace(".png", "_debug.png")
+    cv2.imwrite(debug_path, refined_mask)
+    cv2.imwrite(output_path, refined_mask)
+
     return True
 
-#  Main Processing Function
-def main(image_folder):
-    if not os.path.exists(image_folder):
-        logging.error("❌ Input folder not found. Run motion vector extraction first.")
+def main():
+    frame_files = sorted([f for f in os.listdir(SEGFORMER_MASKS_DIR) if f.endswith(".png")])
+    if not frame_files:
+        logging.error("❌ No SegFormer masks found. Ensure SegFormer step ran first.")
         return
-    if not any(f.endswith('.png') for f in os.listdir(image_folder)):
-        logging.error("❌ No PNG files found in input folder.")
-        return
-
-    os.makedirs(OUTPUT_DIR, exist_ok=True)
-    os.makedirs(OUTPUT_MASKS_DIR, exist_ok=True)
-    
-    # Ensure we're reading from the correct folder
-    if not os.path.exists(image_folder):
-        logging.error(f"Input folder not found: {image_folder}")
-        return
-
-    frame_files = sorted([f for f in os.listdir(image_folder) if f.endswith(".png")])
-    logging.info(f"Found {len(frame_files)} frames to process")
 
     for frame_file in tqdm(frame_files, desc="Processing frames"):
-        image_path = os.path.join(image_folder, frame_file)
+        segformer_mask_path = os.path.join(SEGFORMER_MASKS_DIR, frame_file)
+        motion_vector_path = os.path.join(MOTION_VECTORS_DIR, frame_file)
         output_path = os.path.join(OUTPUT_MASKS_DIR, frame_file)
-        if process_frame(image_path, output_path):
-            logging.debug(f"Processed {frame_file}")
-        else:
-            logging.error(f"Failed to process {frame_file}")
 
-    logging.info(f"AI Processing Completed! Results saved in {OUTPUT_MASKS_DIR}")
+        process_frame(segformer_mask_path, motion_vector_path, output_path)
+
+    logging.info("✅ AI Processing Completed! Masks saved in output/masks.")
 
 if __name__ == "__main__":
-    if len(sys.argv) < 2:
-        print("Usage: python ai_processing.py <image_folder>")
-        sys.exit(1)
-    
-    image_folder = sys.argv[1]
-    main(image_folder)
+    main()

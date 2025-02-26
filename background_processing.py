@@ -3,104 +3,90 @@ import cv2
 import numpy as np
 from tqdm import tqdm
 
-# Define the output structure
+# Define directories
 OUTPUT_DIR = "output"
-MOTION_VECTORS_DIR = os.path.join(OUTPUT_DIR, "motion_vectors")
-MASKS_DIR = os.path.join(OUTPUT_DIR, "masks")
 REFINED_MASKS_DIR = os.path.join(OUTPUT_DIR, "refined_masks")
-SEGFORMER_MASKS_DIR = os.path.join(OUTPUT_DIR, "segformer_masks")
+ORIGINAL_IMAGES_DIR = os.path.join(OUTPUT_DIR, "segformer_masks")  # Use the original images
 CUTOUTS_DIR = os.path.join(OUTPUT_DIR, "cutouts")
 
-os.makedirs(OUTPUT_DIR, exist_ok=True)
 os.makedirs(CUTOUTS_DIR, exist_ok=True)
 
-def apply_alpha_blending(image, mask):
-    """
-    Applies an alpha mask to the original image for transparency support.
-    """
-    if image is None or mask is None:
-        print("Error: One or more input images are invalid.")
-        return None
-    if len(image.shape) < 3 or image.shape[2] != 3:
-        print("Error: Expected a 3-channel image but received something else.")
-        return None
-    if image.shape[:2] != mask.shape:
-        mask = cv2.resize(mask, (image.shape[1], image.shape[0]), interpolation=cv2.INTER_LINEAR)
-    b, g, r = cv2.split(image)
-    alpha = mask.astype(np.uint8)
-    return cv2.merge([b, g, r, alpha])
-
-def refine_mask(mask):
-    """
-    Applies morphological operations to refine mask edges.
-    """
+def fix_mask(mask):
+    """Connects disjointed parts of a mask by filling gaps."""
     if mask is None:
         return None
-    kernel = np.ones((5, 5), np.uint8)
-    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
-    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
+
+    # Convert to binary
     _, mask = cv2.threshold(mask, 127, 255, cv2.THRESH_BINARY)
+
+    # Fill small holes using morphological operations
+    kernel = np.ones((15, 15), np.uint8)  # Bigger kernel to ensure parts connect
+    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
+
     return mask
 
-def process_image(image_path, mask_path, output_path, background_path=None):
-    """
-    Processes an image by applying its segmentation mask and optionally replacing the background.
-    """
+def apply_alpha_mask(image, mask):
+    """Applies the fixed mask to create a transparent cutout."""
+    if image is None or mask is None:
+        print(" Error: One or more input images are invalid.")
+        return None
+
+    # Resize mask to match the original image
+    mask = cv2.resize(mask, (image.shape[1], image.shape[0]), interpolation=cv2.INTER_NEAREST)
+
+    # Apply mask to remove background
+    b, g, r = cv2.split(image)
+    alpha = mask.astype(np.uint8)  # Use the mask as alpha channel
+    cutout = cv2.merge([b, g, r, alpha])
+
+    return cutout
+
+def process_image(image_path, mask_path, output_path):
+    """Creates a fully connected mask and applies it to the original image."""
+    if not os.path.exists(image_path) or not os.path.exists(mask_path):
+        print(f" Skipping {image_path} - Missing mask or original image.")
+        return
+
+    # Load images
     image = cv2.imread(image_path, cv2.IMREAD_COLOR)
     mask = cv2.imread(mask_path, cv2.IMREAD_GRAYSCALE)
+
     if image is None or mask is None:
-        print(f"Error loading {image_path} or {mask_path}")
+        print(f" Error loading {image_path} or {mask_path}. Skipping...")
         return
-    
-    mask = refine_mask(mask)
-    if mask is None:
-        print(f"Skipping {image_path} due to invalid mask.")
-        return
-    
-    cutout = apply_alpha_blending(image, mask)
+
+    # Fix and connect mask regions
+    fixed_mask = fix_mask(mask)
+
+    # Apply mask to original image
+    cutout = apply_alpha_mask(image, fixed_mask)
+
     if cutout is None:
-        print(f"Skipping {image_path} due to invalid cutout creation.")
+        print(f" Skipping {image_path} due to invalid cutout creation.")
         return
-    
+
+    # Save the cutout with background removed
     cv2.imwrite(output_path, cutout, [cv2.IMWRITE_PNG_COMPRESSION, 9])
 
-    if background_path:
-        background = cv2.imread(background_path)
-        if background is None:
-            print(f"Error loading background image: {background_path}")
-            return
-        background_resized = cv2.resize(background, (image.shape[1], image.shape[0]))
-        mask_inv = cv2.bitwise_not(mask)
-        fg = cv2.bitwise_and(image, image, mask=mask)
-        bg = cv2.bitwise_and(background_resized, background_resized, mask=mask_inv)
-        combined = cv2.add(fg, bg)
-        cv2.imwrite(output_path.replace(".png", "_bg.png"), combined)
-
 def main():
-    """
-    Processes all images in the pipeline's output directories and applies transparency & background replacement.
-    """
-    input_images_dir = REFINED_MASKS_DIR
-    input_masks_dir = MASKS_DIR
-    output_dir = CUTOUTS_DIR
-    
-    os.makedirs(output_dir, exist_ok=True)
-    image_files = sorted([f for f in os.listdir(input_images_dir) if f.endswith(".png")])
-    mask_files = sorted([f for f in os.listdir(input_masks_dir) if f.endswith(".png")])
+    """Processes all images and generates transparent cutouts with fixed masks."""
+    mask_files = sorted([f for f in os.listdir(REFINED_MASKS_DIR) if f.endswith(".png")])
+    original_files = sorted([f for f in os.listdir(ORIGINAL_IMAGES_DIR) if f.endswith(".png")])
 
-    if len(image_files) == 0 or len(mask_files) == 0:
-        print("Error: No valid image or mask files found in the provided directories.")
+    matching_files = list(set(mask_files) & set(original_files))
+
+    if len(matching_files) == 0:
+        print(" No matching image/mask pairs found. Ensure all processing steps completed.")
         return
 
-    if len(image_files) != len(mask_files):
-        print("Error: Mismatch between number of images and masks.")
-        return
+    for frame_file in tqdm(matching_files, total=len(matching_files), desc="Processing cutouts"):
+        image_path = os.path.join(ORIGINAL_IMAGES_DIR, frame_file)
+        mask_path = os.path.join(REFINED_MASKS_DIR, frame_file)
+        output_path = os.path.join(CUTOUTS_DIR, frame_file)
 
-    for img_file, mask_file in tqdm(zip(image_files, mask_files), total=len(image_files), desc="Processing images"):
-        img_path = os.path.join(input_images_dir, img_file)
-        mask_path = os.path.join(input_masks_dir, mask_file)
-        output_path = os.path.join(output_dir, img_file)
-        process_image(img_path, mask_path, output_path)
+        process_image(image_path, mask_path, output_path)
+
+    print(" Transparent Cutouts Successfully Created!")
 
 if __name__ == "__main__":
     main()
