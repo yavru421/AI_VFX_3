@@ -1,139 +1,311 @@
 import sys
-import subprocess
 import os
 import json
+import subprocess
+import psutil
 from pathlib import Path
-from PyQt6.QtWidgets import QApplication, QMainWindow, QPushButton, QFileDialog, QLabel, QProgressBar, QVBoxLayout, QWidget, QTextEdit, QComboBox
-from PyQt6.QtCore import Qt, QThread, pyqtSignal
+from PyQt6.QtWidgets import (
+    QApplication, QMainWindow, QVBoxLayout, QWidget, QListWidget, QPushButton, 
+    QProgressBar, QTextEdit, QLabel, QTabWidget, QSplitter, QTreeView, QFileDialog,
+    QMenuBar, QToolBar, QStatusBar, QDockWidget, QGraphicsView, QGraphicsScene, 
+    QCheckBox, QRadioButton, QSpinBox, QProgressDialog, QHBoxLayout, QListWidgetItem, QMessageBox, QScrollArea
+)
+from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer
+from PyQt6.QtGui import QIcon, QAction
 
-class PathManager:
-    def __init__(self, base_dir, resolution="1920x1080"):
-        self.base_dir = Path(base_dir).absolute()
-        self.resolution = resolution  # Store resolution
+CONFIG_FILE = "config.json"
 
-    def set_resolution(self, resolution):
-        self.resolution = resolution  # Update resolution dynamically
-
-    def get_step_dir(self, step_name):
-        safe_name = step_name.lower().replace(' ', '_')
-        return self.base_dir / safe_name
-
-    def format_command(self, command, input_file=None):
-        output_path = str(self.base_dir)
-        if input_file:
-            input_path = str(Path(input_file).absolute())
-        else:
-            input_path = ''
-
-        return command.format(input=input_path, output=output_path)
-
-class PipelineThread(QThread):
+class ProcessingThread(QThread):
+    """ Runs the processing pipeline in a separate thread. """
+    progress_signal = pyqtSignal(int)
     log_signal = pyqtSignal(str)
-    step_complete_signal = pyqtSignal()
+    finished_signal = pyqtSignal()
 
-    def __init__(self, step, path_manager, input_file):
+    def __init__(self, files, steps):
         super().__init__()
-        self.step = step
-        self.path_manager = path_manager
-        self.input_file = input_file
+        self.files = files
+        self.steps = steps
 
     def run(self):
-        command = self.path_manager.format_command(self.step["command"], self.input_file)
-        self.log_signal.emit(f"Running command: {command}")
+        total_steps = len(self.files) * len(self.steps)
+        progress = 0
 
-        process = subprocess.Popen(command, shell=True, cwd=os.path.abspath("."), stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
-        for line in process.stdout:
-            self.log_signal.emit(line.strip())
-        process.wait()
+        for file in self.files:
+            for step in self.steps:
+                command = step["command"].format(input=file, output="output/")
+                self.log_signal.emit(f"Running: {command}")
 
-        self.log_signal.emit(f"{self.step['name']} completed!")
-        self.step_complete_signal.emit()
+                process = subprocess.Popen(command, shell=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+                for line in process.stdout:
+                    self.log_signal.emit(line.strip())
+                process.wait()
+
+                progress += 1
+                self.progress_signal.emit(int(progress / total_steps * 100))
+
+        self.finished_signal.emit()
 
 class AI_VFX_GUI(QMainWindow):
     def __init__(self):
         super().__init__()
 
-        with open('config.json', 'r') as f:
+        # Load Config
+        with open(CONFIG_FILE, 'r') as f:
             self.config = json.load(f)
 
-        self.path_manager = PathManager(self.config['output_dir'])
-        self.video_path = None  # No video selected initially
-
         self.setWindowTitle("AI VFX Pipeline")
-        self.setGeometry(100, 100, 800, 600)
-        self.layout = QVBoxLayout()
+        self.setGeometry(100, 100, 1200, 800)
 
-        # Resolution Selection
-        self.resolution_label = QLabel("Select Output Resolution:")
-        self.layout.addWidget(self.resolution_label)
+        self.init_ui()
 
-        self.resolution_dropdown = QComboBox()
-        self.resolution_dropdown.addItems(["1920x1080", "1080x1920", "1280x720", "640x480"])
-        self.resolution_dropdown.setCurrentText("1920x1080")
-        self.layout.addWidget(self.resolution_dropdown)
+    def init_ui(self):
+        """ Set up UI components. """
+        self.tabs = QTabWidget()
+        self.setCentralWidget(self.tabs)
 
-        # Video Selection
-        self.video_label = QLabel("Select a Video File:")
-        self.layout.addWidget(self.video_label)
+        # Create Tabs
+        self.setup_file_selection_tab()
+        self.setup_processing_and_logs_tab()  # Changed to combined tab
+        self.setup_cleaning_tab()
 
-        self.load_button = QPushButton("Load Video")
-        self.load_button.clicked.connect(self.load_video)
-        self.layout.addWidget(self.load_button)
+        # Status Bar
+        self.status_bar = QStatusBar()
+        self.setStatusBar(self.status_bar)
 
-        # Buttons for Pipeline Steps
-        self.buttons = []
-        self.threads = []
+        # Menu Bar
+        self.menu_bar = self.menuBar()
+        file_menu = self.menu_bar.addMenu("File")
+        open_action = QAction("Open Files", self)
+        open_action.triggered.connect(self.load_files)
+        file_menu.addAction(open_action)
 
-        for i, step in enumerate(self.config["steps"]):
-            button = QPushButton(step["name"])
-            button.setEnabled(False)
-            button.clicked.connect(lambda _, s=step, idx=i: self.run_step(s, idx))
-            self.layout.addWidget(button)
-            self.buttons.append(button)
+        # Tool Bar
+        self.tool_bar = QToolBar("Main Toolbar")
+        self.addToolBar(self.tool_bar)
+        self.tool_bar.addAction(open_action)
 
+    def setup_file_selection_tab(self):
+        """ Create File Selection UI without QFileSystemModel """
+        tab = QWidget()
+        layout = QVBoxLayout()
+
+        # File List
+        self.file_list = QListWidget()
+        layout.addWidget(QLabel("Selected Files:"))
+        layout.addWidget(self.file_list)
+
+        # Load Files Button
+        self.load_button = QPushButton("Load Files")
+        self.load_button.clicked.connect(self.load_files)
+        layout.addWidget(self.load_button)
+
+        # Folder Browser (Using QFileDialog Instead of QFileSystemModel)
+        self.select_folder_button = QPushButton("Select Folder")
+        self.select_folder_button.clicked.connect(self.open_folder_dialog)
+        layout.addWidget(QLabel("Select a Folder:"))
+        layout.addWidget(self.select_folder_button)
+
+        tab.setLayout(layout)
+        self.tabs.addTab(tab, "File Selection")
+
+    def setup_processing_and_logs_tab(self):
+        """Create Processing and Logs UI side by side"""
+        tab = QWidget()
+        layout = QHBoxLayout()  # Horizontal layout for side-by-side
+
+        # Left side - Processing
+        processing_widget = QWidget()
+        processing_layout = QVBoxLayout()
+
+        # Pipeline Steps Selection
+        processing_layout.addWidget(QLabel("Pipeline Steps:"))
+        self.step_selector = QListWidget()
+        self.step_selector.addItems([step["name"] for step in self.config["steps"]])
+        self.step_selector.setSelectionMode(QListWidget.SelectionMode.SingleSelection)
+        processing_layout.addWidget(self.step_selector)
+
+        # Control Buttons
+        button_layout = QHBoxLayout()
+        self.run_step_button = QPushButton("Run Selected Step")
+        self.run_step_button.clicked.connect(self.run_selected_step)
+        self.run_all_button = QPushButton("Run Full Pipeline")
+        self.run_all_button.clicked.connect(self.start_processing)
+        button_layout.addWidget(self.run_all_button)
+        
+        processing_layout.addLayout(button_layout)
+
+        # Progress Bar
         self.progress_bar = QProgressBar()
-        self.layout.addWidget(self.progress_bar)
+        processing_layout.addWidget(self.progress_bar)
+        
+        processing_widget.setLayout(processing_layout)
+
+        # Right side - Logs
+        logs_widget = QWidget()
+        logs_layout = QVBoxLayout()
 
         self.log_output = QTextEdit()
         self.log_output.setReadOnly(True)
-        self.layout.addWidget(self.log_output)
+        logs_layout.addWidget(QLabel("Processing Logs:"))
+        logs_layout.addWidget(self.log_output)
 
-        central_widget = QWidget()
-        central_widget.setLayout(self.layout)
-        self.setCentralWidget(central_widget)
+        # System Monitor
+        self.system_monitor = QLabel("CPU: 0% | RAM: 0%")
+        logs_layout.addWidget(self.system_monitor)
+        
+        logs_widget.setLayout(logs_layout)
 
-    def load_video(self):
-        file_dialog = QFileDialog()
-        file_path, _ = file_dialog.getOpenFileName(self, "Select Video File", "", "Videos (*.mp4 *.avi *.mov)")
-        if file_path:
-            self.video_label.setText(f"Selected Video: {file_path}")
-            self.video_path = file_path
+        # Add splitter for resizable panels
+        splitter = QSplitter(Qt.Orientation.Horizontal)
+        splitter.addWidget(processing_widget)
+        splitter.addWidget(logs_widget)
+        splitter.setSizes([400, 400])  # Equal initial widths
 
-            # Enable first button only
-            self.buttons[0].setEnabled(True)
+        layout.addWidget(splitter)
+        tab.setLayout(layout)
+        self.tabs.addTab(tab, "Processing & Logs")
 
-    def run_step(self, step, index):
-        self.log_output.append(f"Starting {step['name']}...")
+    def setup_cleaning_tab(self):
+        """Create Cleaning UI with folder buttons"""
+        tab = QWidget()
+        layout = QVBoxLayout()
 
-        command = self.path_manager.format_command(step["command"], self.video_path)
+        # Add scroll area for folder buttons
+        self.folder_buttons_layout = QVBoxLayout()
+        folder_scroll = QWidget()
+        folder_scroll.setLayout(self.folder_buttons_layout)
 
-        self.log_output.append(f"Running command: {command}")
-        thread = PipelineThread(step, self.path_manager, self.video_path)
-        thread.log_signal.connect(self.log_output.append)
-        thread.step_complete_signal.connect(lambda: self.enable_next_step(index))
-        thread.start()
-        self.threads.append(thread)
+        scroll_area = QScrollArea()
+        scroll_area.setWidget(folder_scroll)
+        scroll_area.setWidgetResizable(True)
+        layout.addWidget(scroll_area)
 
-    def enable_next_step(self, current_index):
-        """ Enables the next step only when the current step is completed """
-        if current_index + 1 < len(self.buttons):
-            self.buttons[current_index + 1].setEnabled(True)
+        # Controls
+        controls_layout = QHBoxLayout()
+        
+        self.refresh_dirs_button = QPushButton("Refresh Directories")
+        self.refresh_dirs_button.clicked.connect(self.refresh_directories)
+        controls_layout.addWidget(self.refresh_dirs_button)
 
-def main():
+        self.clean_all_button = QPushButton("Clean All Selected")
+        self.clean_all_button.clicked.connect(self.clean_selected_directories)
+        controls_layout.addWidget(self.clean_all_button)
+        
+        layout.addLayout(controls_layout)
+
+        tab.setLayout(layout)
+        self.tabs.addTab(tab, "Cleanup")
+
+        # Initial directory load
+        self.refresh_directories()
+
+    def refresh_directories(self):
+        """Refresh the list of available directories with buttons"""
+        # Clear existing buttons
+        for i in reversed(range(self.folder_buttons_layout.count())): 
+            self.folder_buttons_layout.itemAt(i).widget().setParent(None)
+
+        # Add new buttons for each directory
+        for root, dirs, files in os.walk("output"):
+            for dir_name in dirs:
+                dir_path = os.path.join(root, dir_name)
+                if any(os.path.isfile(os.path.join(dir_path, f)) for f in os.listdir(dir_path)):
+                    button = QPushButton(dir_path)
+                    button.setCheckable(True)
+                    self.folder_buttons_layout.addWidget(button)
+
+    def clean_selected_directories(self):
+        """Clean files from selected directory buttons"""
+        selected_dirs = []
+        for i in range(self.folder_buttons_layout.count()):
+            button = self.folder_buttons_layout.itemAt(i).widget()
+            if button.isChecked():
+                selected_dirs.append(button.text())
+
+        if not selected_dirs:
+            QMessageBox.warning(self, "No Selection", "Please select directories to clean.")
+            return
+
+        # Confirm deletion
+        dirs_text = "\n".join(selected_dirs)
+        reply = QMessageBox.question(self, 'Confirm Cleanup',
+                                   f'Are you sure you want to delete all files in:\n\n{dirs_text}',
+                                   QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                                   QMessageBox.StandardButton.No)
+
+        if reply == QMessageBox.StandardButton.Yes:
+            for dir_path in selected_dirs:
+                try:
+                    for file_name in os.listdir(dir_path):
+                        file_path = os.path.join(dir_path, file_name)
+                        if os.path.isfile(file_path):
+                            os.unlink(file_path)
+                    self.log_output.append(f"Cleaned: {dir_path}")
+                except Exception as e:
+                    self.log_output.append(f"Error cleaning {dir_path}: {str(e)}")
+            
+            QMessageBox.information(self, "Cleanup Complete", "Selected directories have been cleaned!")
+            self.refresh_directories()
+
+    def run_selected_step(self):
+        """Run only the selected pipeline step"""
+        if not self.file_list.count():
+            self.log_output.append("Error: No input files selected")
+            return
+
+        selected_items = self.step_selector.selectedItems()
+        if not selected_items:
+            self.log_output.append("Error: No pipeline step selected")
+            return
+
+        step_name = selected_items[0].text()
+        step = next((s for s in self.config["steps"] if s["name"] == step_name), None)
+        
+        if step:
+            files = [self.file_list.item(i).text() for i in range(self.file_list.count())]
+            self.thread = ProcessingThread([files[0]], [step])  # Process first file
+            self.thread.progress_signal.connect(self.progress_bar.setValue)
+            self.thread.log_signal.connect(self.log_output.append)
+            self.thread.finished_signal.connect(
+                lambda: self.status_bar.showMessage(f"Step '{step_name}' Completed!", 5000)
+            )
+            self.thread.start()
+            self.log_output.append(f"Running step: {step_name}")
+
+    def load_files(self):
+        """ Load files via QFileDialog """
+        files, _ = QFileDialog.getOpenFileNames(self, "Select Files", "", "Videos (*.mp4 *.mov);;Images (*.png *.jpg *.tif)")
+        if files:
+            self.file_list.addItems(files)
+
+    def open_folder_dialog(self):
+        """ Opens a folder selection dialog """
+        file_dialog = QFileDialog(self)
+        file_dialog.setFileMode(QFileDialog.FileMode.Directory)
+        if file_dialog.exec():
+            selected_folder = file_dialog.selectedFiles()[0]
+            print("Selected Folder:", selected_folder)
+
+    def start_processing(self):
+        """ Start processing pipeline """
+        files = [self.file_list.item(i).text() for i in range(self.file_list.count())]
+        steps = self.config["steps"]
+
+        self.thread = ProcessingThread(files, steps)
+        self.thread.progress_signal.connect(self.progress_bar.setValue)
+        self.thread.log_signal.connect(self.log_output.append)
+        self.thread.finished_signal.connect(lambda: self.status_bar.showMessage("Processing Completed!", 5000))
+
+        self.thread.start()
+
+    def update_system_monitor(self):
+        """ Update system resource usage display """
+        cpu_usage = psutil.cpu_percent()
+        ram_usage = psutil.virtual_memory().percent
+        self.system_monitor.setText(f"CPU: {cpu_usage}% | RAM: {ram_usage}%")
+
+if __name__ == "__main__":
     app = QApplication(sys.argv)
     window = AI_VFX_GUI()
     window.show()
-    return app.exec()
-
-if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(app.exec())

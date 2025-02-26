@@ -47,3 +47,10 @@ pipeline_report.html
 *.pth
 *.onnx
 *.pt
+
+# Allow example images
+!example_pipeline_images/
+!example_pipeline_images/*/
+!example_pipeline_images/**/*.png
+!example_pipeline_images/**/*.jpg
+!example_pipeline_images/README.md

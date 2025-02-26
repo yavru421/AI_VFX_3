@@ -36,14 +36,14 @@ def process_frame(segformer_mask_path, motion_vector_path, output_path):
     # Load SegFormer mask
     mask = cv2.imread(segformer_mask_path, cv2.IMREAD_GRAYSCALE)
     if mask is None:
-        logging.error(f"❌ Failed to read SegFormer mask: {segformer_mask_path}")
+        logging.error(f"Failed to read SegFormer mask: {segformer_mask_path}")
         return False
 
     # Load motion vector, check if it exists
     if os.path.exists(motion_vector_path):
         motion_vector = cv2.imread(motion_vector_path, cv2.IMREAD_GRAYSCALE)
     else:
-        logging.warning(f"⚠️ Motion vector missing for {motion_vector_path}. Using fallback.")
+        logging.warning(f"Motion vector missing for {motion_vector_path}. Using fallback.")
         motion_vector = np.ones_like(mask) * 255  # Fallback to all white
 
     # Ensure size consistency by resizing **mask** to motion vector size
@@ -68,7 +68,7 @@ def process_frame(segformer_mask_path, motion_vector_path, output_path):
 def main():
     frame_files = sorted([f for f in os.listdir(SEGFORMER_MASKS_DIR) if f.endswith(".png")])
     if not frame_files:
-        logging.error("❌ No SegFormer masks found. Ensure SegFormer step ran first.")
+        logging.error("No SegFormer masks found. Ensure SegFormer step ran first.")
         return
 
     for frame_file in tqdm(frame_files, desc="Processing frames"):
@@ -78,7 +78,7 @@ def main():
 
         process_frame(segformer_mask_path, motion_vector_path, output_path)
 
-    logging.info("✅ AI Processing Completed! Masks saved in output/masks.")
+    logging.info("AI Processing Completed! Masks saved in output/masks.")
 
 if __name__ == "__main__":
     main()

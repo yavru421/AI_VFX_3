@@ -1,78 +1,72 @@
 import os
 import cv2
+import torch
 import numpy as np
-from pathlib import Path
+from tqdm import tqdm
+from transformers import SegformerImageProcessor, SegformerForSemanticSegmentation
 
-# Paths
-OUTPUT_DIR = "output"
-MOTION_VECTORS_DIR = os.path.join(OUTPUT_DIR, "motion_vectors")
-REFINED_MASKS_DIR = os.path.join(OUTPUT_DIR, "refined_masks")
-CUTOUTS_DIR = os.path.join(OUTPUT_DIR, "cutouts")
-SUBTRACTED_DIR = os.path.join(OUTPUT_DIR, "subtracted")
+# Enable CUDA optimizations
+torch.backends.cuda.matmul.allow_tf32 = True
+torch.backends.cudnn.benchmark = True
+torch.backends.cudnn.allow_tf32 = True
 
-def process_frame(frame_file, input_frame=None):
-    """Process a single frame, subtracting masked areas."""
-    refined_mask_path = os.path.join(REFINED_MASKS_DIR, frame_file)
-    output_path = os.path.join(SUBTRACTED_DIR, f"subtracted_{frame_file}")
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    # Load mask
-    refined_mask = cv2.imread(refined_mask_path, cv2.IMREAD_GRAYSCALE)
-    if refined_mask is None:
-        print(f" Skipping {frame_file} - No mask found")
-        return
+MODEL_NAME = "nvidia/segformer-b3-finetuned-ade-512-512"
+processor = SegformerImageProcessor.from_pretrained(MODEL_NAME)
+model = SegformerForSemanticSegmentation.from_pretrained(MODEL_NAME).to(device).eval().half()
 
-    # Use provided input frame or load from cutouts
-    if input_frame is None:
-        cutout_path = os.path.join(CUTOUTS_DIR, frame_file)
-        input_frame = cv2.imread(cutout_path, cv2.IMREAD_COLOR)
-        if input_frame is None:
-            print(f" Skipping {frame_file} - No input frame")
-            return
+INPUT_DIR = "output/final_transparent"
+OUTPUT_DIR = "output/segformer_final"
+os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-    # Resize mask if needed
-    if refined_mask.shape[:2] != input_frame.shape[:2]:
-        refined_mask = cv2.resize(refined_mask, (input_frame.shape[1], input_frame.shape[0]), 
-                                interpolation=cv2.INTER_NEAREST)
+BATCH_SIZE = 4  # Adjust based on available VRAM
 
-    # Ensure mask is binary uint8
-    _, refined_mask = cv2.threshold(refined_mask, 127, 255, cv2.THRESH_BINARY)
+def process_batch(image_paths, output_paths):
+    try:
+        images = []
+        for path in image_paths:
+            img = cv2.imread(path, cv2.IMREAD_COLOR)
+            if img is None:
+                print(f"Failed to read image: {path}")
+                continue
+            img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+            images.append(img_rgb)
+
+        if not images:
+            return False
+
+        # Run SegFormer with proper amp context
+        with torch.cuda.amp.autocast(dtype=torch.float16):
+            inputs = processor(images=images, return_tensors="pt").to(device)
+            with torch.no_grad():
+                logits = model(**inputs).logits
+
+        # Get probability masks
+        probs = torch.nn.functional.softmax(logits, dim=1)
+        refined_masks = probs.max(dim=1).values
+        refined_masks = [(mask.cpu().numpy() * 255).astype(np.uint8) for mask in refined_masks]
+
+        # Save Final Refinement Masks
+        for refined_mask, output_path in zip(refined_masks, output_paths):
+            cv2.imwrite(output_path, refined_mask)
+
+        return True
+
+    except Exception as e:
+        print(f"Error in batch processing: {str(e)}")
+        return False
+
+def main():
+    frame_files = sorted([f for f in os.listdir(INPUT_DIR) if f.endswith(".png")])
     
-    # Invert mask to keep non-masked areas
-    refined_mask = cv2.bitwise_not(refined_mask)
-    
-    # Apply mask to input frame
-    result = cv2.bitwise_and(input_frame, input_frame, mask=refined_mask)
-    
-    # Save result
-    os.makedirs(SUBTRACTED_DIR, exist_ok=True)
-    cv2.imwrite(output_path, result)
-    print(f" Saved subtracted frame: {output_path}")
+    # Process in Batches
+    for i in tqdm(range(0, len(frame_files), BATCH_SIZE), desc="Final SegFormer Pass"):
+        batch_files = frame_files[i:i + BATCH_SIZE]
+        batch_paths = [os.path.join(INPUT_DIR, f) for f in batch_files]
+        output_paths = [os.path.join(OUTPUT_DIR, f) for f in batch_files]
 
-def process_video(input_video=None):
-    """Process entire video or directory of frames."""
-    if input_video and os.path.exists(input_video):
-        cap = cv2.VideoCapture(input_video)
-        frame_number = 0
-        
-        while True:
-            ret, frame = cap.read()
-            if not ret:
-                break
-                
-            frame_file = f"frame_{frame_number:04d}.png"
-            process_frame(frame_file, frame)
-            frame_number += 1
-            
-        cap.release()
-    else:
-        frame_files = sorted([f for f in os.listdir(CUTOUTS_DIR) if f.endswith(('.png', '.jpg'))])
-        for frame_file in frame_files:
-            process_frame(frame_file)
+        process_batch(batch_paths, output_paths)
 
 if __name__ == "__main__":
-    import argparse
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--input', help='Optional input video file')
-    args = parser.parse_args()
-    
-    process_video(args.input if args else None)
+    main()

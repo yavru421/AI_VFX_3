@@ -1,86 +1,99 @@
-# AI_VFX_3: Offline AI-Powered Background Removal  
+# AI VFX Pipeline
 
-#its a work in progress, gut it does work!
+A Python-based VFX pipeline that uses AI to extract people from videos with transparency. Built this because I got tired of rotoscoping everything manually.
 
-🚀 **No APIs. No Paywalls. 100% Local AI Video Processing.**  
+## Features
+- Extracts frames from video at correct FPS
+- Uses SegFormer for AI-powered person detection
+- Generates clean alpha channel cutouts
+- Full GUI interface for easy operation
+- Directory cleanup tools included
+- Progress tracking and system monitoring
+- Supports batch processing
 
-## ✨ Why This Exists  
-Most "AI background removers" force you to use cloud-based APIs, hidden subscriptions, or online accounts.  
-**This project is different.**  
-- **Runs 100% locally** – No internet required.  
-- **No API keys needed** – Your data stays on your machine.  
-- **Open-source, but protected** – Anyone can use it, but no one can rebrand or resell it without permission.  
+## How to Use
+1. Load your video through the GUI
+2. Pick individual steps or run the full pipeline:
+   - Frame extraction
+   - Person mask generation
+   - Mask processing
+   - Final cutout creation
+3. Get your cutouts from the output folder
 
-## 🎬 Features  
-✅ **AI-Based Background Removal** (No green screen required!)  
-✅ **FFmpeg Motion Vectors + AI Segmentation** for high accuracy  
-✅ **GUI for Easy Use** (No command-line required)  
-✅ **Works on Any Video File** (MP4, MOV, AVI, etc.)  
-✅ **Fully Modular** – You can swap AI models if needed  
-✅ **No Subscription Fees. No Bullsh*t.**  
-
-🔹 **Pro Version Available** *(Coming Soon!)*  
-💡 Looking for **better mask refinement, auto batch processing, and plugin support?**  
-🛒 Stay tuned for the **Pro version** that includes premium features!  
-
-## ⚙️ Requirements
-
-- Python 3.9+  
-- CUDA capable GPU  
-- FFmpeg  
-
-## 📥 Installation
-
-1. Clone the repository:
-```bash
-git clone https://github.com/yavru421/AI_VFX_3.git
-cd AI_VFX_3
-```
-
-2. Create  environment:
-```bash
-env create -f environment.yml
-activate ai_vfx_pipeline
-```
-
-## 🚀 Usage
-
-1. Launch the GUI:
-```bash
-python gui_main.py
-```
-
-2. Load your video file and follow the processing steps:
-   - Extract Motion Vectors
-   - Run AI Processing
-   - Refine Masks 
-   - Run SegFormer
-   - Generate Transparent PNGs
-
-## 📂 Output Structure
-
+## Directory Structure
 ```
 output/
-├── motion_vectors/
-├── masks/
-├── refined_masks/
-├── segformer_masks/
-└── cutouts/
+  ├── original_frames/    # Extracted video frames
+  ├── masks/             # AI-generated masks
+  ├── cutouts/           # Final transparent PNGs
+  └── debug/             # Debug outputs if needed
 ```
 
-## ⚖️ License
+## Models Used
+- **SegFormer-B3** (nvidia/segformer-b3-finetuned-ade-512-512)
+  - Used for person segmentation
+  - Trained on ADE20K dataset
+  - Good balance of speed and accuracy
+  - Label 12 = person class
 
-This project is licensed under the Mozilla Public License 2.0 with additional commercial use restrictions. See the [LICENSE](LICENSE) file for details.
+## Requirements
+- Python 3.8+
+- PyQt6
+- OpenCV
+- PyTorch
+- Transformers
+- FFMPEG
 
-Key points:
-- Source code must remain open source
-- Commercial use requires explicit permission
-- Modifications must be shared back
-- No closed-source redistribution
+## Installation
+```bash
+# Clone the repo
+git clone [repo_url]
 
+# Create and activate venv
+python -m venv venv
+source venv/bin/activate  # or venv\Scripts\activate on Windows
 
-https://youtu.be/mYFrpPO2QrA
+# Install dependencies
+pip install -r requirements.txt
+```
 
-## 🤝 Contributing
+## Example Pipeline
+Check out `example_pipeline_images/` to see:
+- Input frame examples
+- SegFormer mask generation
+- Mask refinement process
+- Final cutout results
 
-Please read [CONTRIBUTING.md](CONTRIBUTING.md) for contribution guidelines and code of conduct.
+This helps visualize how each step transforms the image.
+
+## Known Issues
+- Might need to clear output folders between runs
+- First frame sometimes needs a second pass
+- GUI can be slow with huge folders
+
+## Tips
+- Run on GPU if you can, way faster
+- Clean directories between tests
+- Check debug output if masks look weird
+- Use the individual step buttons for testing
+
+## License
+Mozilla Public License Version 2.0
+- Source code must stay open source
+- Can be used in commercial projects
+- Modifications must be shared under MPL-2.0
+- Must include original copyright notice
+- Full license: https://www.mozilla.org/en-US/MPL/2.0/
+
+## Why MPL-2.0?
+- Protects the code from being closed-source
+- Requires improvements to be shared back
+- Still allows commercial use
+- Preserves credit to original author
+- Stronger than MIT but not as restrictive as GPL
+
+## Credits
+Built this while trying not to lose my mind doing manual roto. Thanks to:
+- NVIDIA for SegFormer
+- Hugging Face for the model hosting
+- The PyQt team for making GUIs less painful

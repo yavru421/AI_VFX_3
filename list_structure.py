@@ -1,29 +1,48 @@
 #!/usr/bin/env python3
 import os
 import sys
-import json
+from pathlib import Path
+from datetime import datetime
 
-def get_tree(path):
-    """Recursively build a dictionary representing the directory tree."""
-    tree = {"name": os.path.basename(path) or path}
+def print_tree(path, file, prefix="", is_last=True):
+    """Print directory tree in a compact format and write to file."""
+    name = os.path.basename(path) or path
+    
+    # Create the line prefix with proper branching characters
+    marker = "└── " if is_last else "├── "
+    line = f"{prefix}{marker}{name}\n"
+    file.write(line)
+    
+    # If it's a directory, process its contents
     if os.path.isdir(path):
-        tree["type"] = "directory"
-        tree["children"] = []
         try:
-            with os.scandir(path) as it:
-                for entry in it:
-                    tree["children"].append(get_tree(entry.path))
+            entries = sorted([
+                entry for entry in os.scandir(path) 
+                if not entry.name.startswith('.')
+            ], key=lambda x: x.name.lower())
+            
+            for i, entry in enumerate(entries):
+                is_last_entry = (i == len(entries) - 1)
+                next_prefix = prefix + ("    " if is_last else "│   ")
+                print_tree(entry.path, file, next_prefix, is_last_entry)
         except PermissionError:
-            tree["children"].append({"name": "PermissionError", "type": "error"})
-    else:
-        tree["type"] = "file"
-    return tree
+            file.write(f"{prefix}    └── <Permission Denied>\n")
+
+def main():
+    root = os.path.abspath(sys.argv[1] if len(sys.argv) > 1 else '.')
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    output_file = f"directory_structure_{timestamp}.txt"
+    
+    with open(output_file, 'w', encoding='utf-8') as f:
+        f.write(f"Directory Structure for: {root}\n")
+        f.write("Generated: " + datetime.now().strftime("%Y-%m-%d %H:%M:%S") + "\n")
+        f.write("="*50 + "\n\n")
+        
+        print_tree(root, f)
+        
+        f.write("\nDone!")
+    
+    print(f"\nDirectory structure saved to: {output_file}")
 
 if __name__ == '__main__':
-    # Use first command-line argument as root directory or default to current directory.
-    root = sys.argv[1] if len(sys.argv) > 1 else '.'
-    directory_tree = get_tree(root)
-    output_filename = "directory_structure.json"
-    with open(output_filename, "w") as f:
-        json.dump(directory_tree, f, indent=4)
-    print(f"JSON structure saved to {output_filename}")
+    main()

@@ -3,39 +3,24 @@
     "output_dir": "output",
     "steps": [
         {
-            "name": "Extract Motion Vectors",
+            "name": "1. Extract Frames",
             "script": "ffmpeg",
-            "command": "ffmpeg -flags2 +export_mvs -i {input} -vf \"select=not(mod(n\\,2)),codecview=mv=pf+bb\" -vsync vfr -q:v 2 {output}/motion_vectors/frame_%04d.png"
+            "command": "ffmpeg -i {input} -vf \"fps=29.98\" {output}/original_frames/frame_%04d.png"
         },
         {
-            "name": "Run SegFormer (Initial Masks)",
+            "name": "2. Generate Person Masks",
             "script": "python",
             "command": "python segformer_background_removal.py"
         },
         {
-            "name": "Run AI Processing (Refinement with Motion Vectors)",
+            "name": "3. Process Masks",
             "script": "python",
             "command": "python ai_processing.py"
         },
         {
-            "name": "Refine Masks",
-            "script": "python",
-            "command": "python refine_masks.py"
-        },
-        {
-            "name": "Generate Transparent PNGs",
+            "name": "4. Create Cutouts",
             "script": "python",
             "command": "python background_processing.py"
-        },
-        {
-            "name": "Generate Layered EXR Sequence",
-            "script": "python",
-            "command": "python convert_exr.py"
-        },
-        {
-            "name": "Generate Final Subtracted Video",
-            "script": "python",
-            "command": "python convert_exr.py --input \"{input}\""
         }
     ]
 }
